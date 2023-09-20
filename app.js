@@ -3,8 +3,10 @@ const { config } = require("dotenv");
 const {
   startDeploy,
   cancelDeploy,
-  goToStaging,
+  goingToStaging,
   inStaging,
+  goingToProduction,
+  inProduction,
 } = require("./lib/buttons");
 const { checkboxOption, textSection } = require("./lib/helpers");
 
@@ -18,99 +20,60 @@ const app = new App({
   logLevel: LogLevel.DEBUG,
 });
 
-let allServices = {
-  clsi: {
-    status: null, // null, pending, inprogess-staging, staging, inprogess-production, production
-  },
-  history: {
-    status: null, // null, pending, inprogess-staging, staging, inprogess-production, production
-  },
-  web: {
-    status: null, // null, pending, inprogess-staging, staging, inprogess-production, production
-  },
-};
-
 let deploys = {
   deploy_123: {
     channelId: "",
     actionMessageId: "",
     progressMessageId: "",
-    services: ["clsi", "history", "web"],
+    services: [],
   },
 };
 
-app.message(
-  /^(!deploy|going to deploy).*/,
-  async ({ message, event, context }) => {
-    const deployId = "deploy_" + Math.random().toString(36).substring(7);
+app.message(/^(!deploy).*/, async ({ message, event, context }) => {
+  const deployId = "deploy_" + Math.random().toString(36).substring(7);
 
-    const actionMessage = await app.client.chat.postMessage({
-      thread_ts: message.ts,
-      channel: event.channel,
-      blocks: [
-        {
-          block_id: "deploy_form",
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: "Time for a deploy :rocket: \n What service(s) are you deploying?",
-          },
-          accessory: {
-            action_id: "service_selection",
-            type: "checkboxes",
-            // initial_options: [],
-            options: [
-              checkboxOption("clsi"),
-              checkboxOption("history"),
-              checkboxOption("web"),
-            ],
-          },
+  const actionMessage = await app.client.chat.postMessage({
+    thread_ts: message.ts,
+    channel: event.channel,
+    blocks: [
+      {
+        block_id: "deploy_form",
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "Time for a deploy :rocket: \n What service(s) are you deploying?",
         },
-        {
-          type: "actions",
-          elements: [
-            {
-              ...startDeploy,
-              value: deployId,
-            },
-            {
-              ...cancelDeploy,
-              value: deployId,
-            },
+        accessory: {
+          action_id: "service_selection",
+          type: "checkboxes",
+          options: [
+            checkboxOption("clsi"),
+            checkboxOption("history"),
+            checkboxOption("web"),
           ],
         },
-      ],
-    });
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            ...startDeploy,
+            value: deployId,
+          },
+          {
+            ...cancelDeploy,
+            value: deployId,
+          },
+        ],
+      },
+    ],
+  });
 
-    deploys[deployId] = {
-      actionMessageId: actionMessage.ts,
-      channelId: event.channel,
-    };
-  }
-);
-
-async function updateDeployStatus({ deployId, status, text }) {
-  const deploy = deploys[deployId];
-
-  if (deploy.progressMessageId) {
-    await app.client.chat.update({
-      ts: deploy.progressMessageId,
-      channel: deploy.channelId,
-      text,
-    });
-  } else {
-    const deployMessage = await app.client.chat.postMessage({
-      channel: deploy.channelId,
-      text,
-    });
-
-    deploy.progressMessageId = deployMessage.ts;
-  }
-
-  for (const service of deploy.services) {
-    allServices[service].status = status;
-  }
-}
+  deploys[deployId] = {
+    actionMessageId: actionMessage.ts,
+    channelId: event.channel,
+  };
+});
 
 app.action(startDeploy.action_id, async ({ body, ack }) => {
   const deployId = body.actions.find(
@@ -124,25 +87,56 @@ app.action(startDeploy.action_id, async ({ body, ack }) => {
 
   deploys[deployId].services = selectedServices;
 
-  for (const service of selectedServices) {
-    if (allServices[service].status !== null) {
-      await app.client.chat.postMessage({
-        thread_ts: body.message.ts,
-        user: body.user,
-        channel: body.channel.id,
-        text: `There is already a deploy in progress. Current status: *${allServices[service].status}*`,
-      });
-      await ack();
-      return;
+  for (const deploy of Object.values(deploys)) {
+    if (deploy === deploys[deployId]) {
+      continue;
+    }
+
+    for (const service of selectedServices) {
+      if (deploy.services.includes(service)) {
+        await app.client.chat.update({
+          channel: body.channel.id,
+          ts: body.message.ts,
+          blocks: [
+            textSection(
+              `${service} is already being deployed! Please wait until it's done. \nUse the buttons below to update the status.`
+            ),
+            {
+              block_id: "deploy_form",
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: "Time for a deploy :rocket: \n What service(s) are you deploying?",
+              },
+              accessory: {
+                action_id: "service_selection",
+                type: "checkboxes",
+                options: [
+                  checkboxOption("clsi"),
+                  checkboxOption("history"),
+                  checkboxOption("web"),
+                ],
+              },
+            },
+            {
+              type: "actions",
+              elements: [
+                { ...startDeploy, value: deployId },
+                { ...cancelDeploy, value: deployId },
+              ],
+            },
+          ],
+        });
+
+        await ack();
+        return;
+      }
     }
   }
 
   try {
     await updateDeployStatus({
-      status: startDeploy.action_id,
-      text: `:overleaf-duck-party: Deploy of ${selectedServices.join(
-        ", "
-      )} started :rocket:`,
+      text: `*pending* :rocket:`,
       deployId,
     });
 
@@ -156,7 +150,42 @@ app.action(startDeploy.action_id, async ({ body, ack }) => {
         {
           type: "actions",
           elements: [
-            { ...goToStaging, value: deployId },
+            { ...goingToStaging, value: deployId },
+            { ...cancelDeploy, value: deployId },
+          ],
+        },
+      ],
+    });
+  } catch (error) {
+    console.error(error);
+  }
+
+  await ack();
+});
+
+app.action(goingToStaging.action_id, async ({ body, ack }) => {
+  const deployId = body.actions.find(
+    (a) => a.action_id === goingToStaging.action_id
+  ).value;
+  const deploy = deploys[deployId];
+
+  try {
+    await updateDeployStatus({
+      channel: body.channel.id,
+      text: `*going to staging* :rocket:`,
+      deployId,
+    });
+
+    await app.client.chat.update({
+      channel: body.channel.id,
+      ts: deploy.actionMessageId,
+      blocks: [
+        textSection(
+          "Current deploy status: :rocket: *going to staging* :rocket:\nUse the buttons below to update the status."
+        ),
+        {
+          type: "actions",
+          elements: [
             { ...inStaging, value: deployId },
             { ...cancelDeploy, value: deployId },
           ],
@@ -170,18 +199,16 @@ app.action(startDeploy.action_id, async ({ body, ack }) => {
   await ack();
 });
 
-app.action(goToStaging.action_id, async ({ body, ack, action }) => {
+app.action(inStaging.action_id, async ({ body, ack }) => {
   const deployId = body.actions.find(
-    (a) => a.action_id === goToStaging.action_id
+    (a) => a.action_id === inStaging.action_id
   ).value;
-
   const deploy = deploys[deployId];
 
   try {
     await updateDeployStatus({
       channel: body.channel.id,
-      status: goToStaging.action_id,
-      text: ":overleaf-duck-party: Deploy of service(s), going to staging :rocket:",
+      text: `*in staging!* :rocket:`,
       deployId,
     });
 
@@ -194,10 +221,111 @@ app.action(goToStaging.action_id, async ({ body, ack, action }) => {
         ),
         {
           type: "actions",
-          elements: [inStaging, cancelDeploy],
+          elements: [
+            { ...goingToProduction, value: deployId },
+            { ...cancelDeploy, value: deployId },
+          ],
         },
       ],
     });
+  } catch (error) {
+    console.error(error);
+  }
+
+  await ack();
+});
+
+app.action(goingToProduction.action_id, async ({ body, ack }) => {
+  const deployId = body.actions.find(
+    (a) => a.action_id === goingToProduction.action_id
+  ).value;
+  const deploy = deploys[deployId];
+
+  try {
+    await updateDeployStatus({
+      channel: body.channel.id,
+      text: `*going to production!* :rocket:`,
+      deployId,
+    });
+
+    await app.client.chat.update({
+      channel: body.channel.id,
+      ts: deploy.actionMessageId,
+      blocks: [
+        textSection(
+          "Current deploy status: :rocket: *going to production* :rocket:\nUse the buttons below to update the status."
+        ),
+        {
+          type: "actions",
+          elements: [
+            { ...inProduction, value: deployId },
+            { ...cancelDeploy, value: deployId },
+          ],
+        },
+      ],
+    });
+  } catch (error) {
+    console.error(error);
+  }
+
+  await ack();
+});
+
+app.action(inProduction.action_id, async ({ body, ack }) => {
+  const deployId = body.actions.find(
+    (a) => a.action_id === inProduction.action_id
+  ).value;
+  const deploy = deploys[deployId];
+
+  try {
+    await updateDeployStatus({
+      channel: body.channel.id,
+      text: `*in production!* :rocket: All done!`,
+      deployId,
+    });
+
+    await app.client.chat.update({
+      channel: body.channel.id,
+      ts: deploy.actionMessageId,
+      blocks: [
+        textSection(
+          "Current deploy status: :rocket: *in production* :rocket:\nAll done!"
+        ),
+      ],
+    });
+
+    delete deploys[deployId];
+  } catch (error) {
+    console.error(error);
+  }
+
+  await ack();
+});
+
+app.action(cancelDeploy.action_id, async ({ body, ack }) => {
+  const deployId = body.actions.find(
+    (a) => a.action_id === cancelDeploy.action_id
+  ).value;
+  const deploy = deploys[deployId];
+
+  try {
+    await updateDeployStatus({
+      channel: body.channel.id,
+      text: `*deploy canceled!*`,
+      deployId,
+    });
+
+    await app.client.chat.update({
+      channel: body.channel.id,
+      ts: deploy.actionMessageId,
+      blocks: [
+        textSection(
+          "Current deploy status: *cancelled*"
+        ),
+      ],
+    });
+
+    delete deploys[deployId];
   } catch (error) {
     console.error(error);
   }
@@ -213,3 +341,26 @@ app.action(goToStaging.action_id, async ({ body, ack, action }) => {
     console.error("Unable to start App", error);
   }
 })();
+
+async function updateDeployStatus({ deployId, text }) {
+  const deploy = deploys[deployId];
+
+  const prefix = `:overleaf-duck-party: Deploying ${deploy.services
+    .map((s) => `\`${s}\``)
+    .join(" ")} status: `;
+
+  if (deploy.progressMessageId) {
+    await app.client.chat.update({
+      ts: deploy.progressMessageId,
+      channel: deploy.channelId,
+      text: prefix + text,
+    });
+  } else {
+    const deployMessage = await app.client.chat.postMessage({
+      channel: deploy.channelId,
+      text: prefix + text,
+    });
+
+    deploy.progressMessageId = deployMessage.ts;
+  }
+}
