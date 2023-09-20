@@ -29,7 +29,7 @@ let deploys = {
   },
 };
 
-app.message(/^(!deploy).*/, async ({ message, event, context }) => {
+app.message(/(!deploy).*/, async ({ message, event, context }) => {
   const deployId = "deploy_" + Math.random().toString(36).substring(7);
 
   const actionMessage = await app.client.chat.postMessage({
@@ -136,7 +136,7 @@ app.action(startDeploy.action_id, async ({ body, ack }) => {
 
   try {
     await updateDeployStatus({
-      text: `*pending* :rocket:`,
+      text: `:overleaf-duck-party: deploying _services_... status: *pending* :rocket:`,
       deployId,
     });
 
@@ -172,7 +172,7 @@ app.action(goingToStaging.action_id, async ({ body, ack }) => {
   try {
     await updateDeployStatus({
       channel: body.channel.id,
-      text: `*going to staging* :rocket:`,
+      text: `:overleaf-duck-party: deploying _services_... status: *going to staging* :rocket:`,
       deployId,
     });
 
@@ -208,7 +208,7 @@ app.action(inStaging.action_id, async ({ body, ack }) => {
   try {
     await updateDeployStatus({
       channel: body.channel.id,
-      text: `*in staging!* :rocket:`,
+      text: `:overleaf-duck-party: deploying _services_... status: *in staging!* :rocket:`,
       deployId,
     });
 
@@ -244,7 +244,7 @@ app.action(goingToProduction.action_id, async ({ body, ack }) => {
   try {
     await updateDeployStatus({
       channel: body.channel.id,
-      text: `*going to production!* :rocket:`,
+      text: `:overleaf-duck-party: Deploying _services_... status: *going to production!* :rocket:`,
       deployId,
     });
 
@@ -280,7 +280,7 @@ app.action(inProduction.action_id, async ({ body, ack }) => {
   try {
     await updateDeployStatus({
       channel: body.channel.id,
-      text: `*in production!* :rocket: All done!`,
+      text: `:white_check_mark: deploy finished! _services_ deployed :rocket:`,
       deployId,
     });
 
@@ -311,18 +311,14 @@ app.action(cancelDeploy.action_id, async ({ body, ack }) => {
   try {
     await updateDeployStatus({
       channel: body.channel.id,
-      text: `*deploy canceled!*`,
+      text: `deploy of _services_ *canceled*!`,
       deployId,
     });
 
     await app.client.chat.update({
       channel: body.channel.id,
       ts: deploy.actionMessageId,
-      blocks: [
-        textSection(
-          "Current deploy status: *cancelled*"
-        ),
-      ],
+      blocks: [textSection("Current deploy status: *cancelled*")],
     });
 
     delete deploys[deployId];
@@ -345,20 +341,21 @@ app.action(cancelDeploy.action_id, async ({ body, ack }) => {
 async function updateDeployStatus({ deployId, text }) {
   const deploy = deploys[deployId];
 
-  const prefix = `:overleaf-duck-party: Deploying ${deploy.services
-    .map((s) => `\`${s}\``)
-    .join(" ")} status: `;
+  const content = text.replace(
+    "_services_",
+    deploy.services.map((s) => `\`${s}\``).join(" ")
+  )
 
   if (deploy.progressMessageId) {
     await app.client.chat.update({
       ts: deploy.progressMessageId,
       channel: deploy.channelId,
-      text: prefix + text,
+      text: content,
     });
   } else {
     const deployMessage = await app.client.chat.postMessage({
       channel: deploy.channelId,
-      text: prefix + text,
+      text: content,
     });
 
     deploy.progressMessageId = deployMessage.ts;
