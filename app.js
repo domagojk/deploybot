@@ -20,14 +20,7 @@ const app = new App({
   logLevel: LogLevel.DEBUG,
 });
 
-let deploys = {
-  deploy_123: {
-    channelId: "",
-    actionMessageId: "",
-    progressMessageId: "",
-    services: [],
-  },
-};
+let deploys = {};
 
 app.message(/(!deploy).*/, async ({ message, event, context }) => {
   const deployId = "deploy_" + Math.random().toString(36).substring(7);
@@ -99,14 +92,14 @@ app.action(startDeploy.action_id, async ({ body, ack }) => {
           ts: body.message.ts,
           blocks: [
             textSection(
-              `${service} is already being deployed! Please wait until it's done. \nUse the buttons below to update the status.`
+              `${service} is already being deployed! Please wait until it's done..`
             ),
             {
               block_id: "deploy_form",
               type: "section",
               text: {
                 type: "mrkdwn",
-                text: "Time for a deploy :rocket: \n What service(s) are you deploying?",
+                text: "What service(s) are you deploying?",
               },
               accessory: {
                 action_id: "service_selection",
